@@ -1,0 +1,6 @@
+{
+  "name": "Mobile Banking UX Dataset Automation",
+  "description": "Real-time automated pipeline, interactive validation, scoring, and analytics platform for international mobile banking UX dataset (DIT Internship Task 07).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
