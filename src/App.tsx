@@ -206,7 +206,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span>DefineInfoTech Pvt. Ltd. (DIT)</span>
             <span aria-hidden="true">·</span>
-            <span>Internship Task 07 Automation Project</span>
+            <span>Mobile Banking UX Automation Project</span>
             <span aria-hidden="true">·</span>
             <span>Kanmani Suresh & Salman</span>
           </div>

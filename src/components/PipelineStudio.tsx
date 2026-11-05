@@ -182,9 +182,9 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-1.5 max-w-2xl">
             <div className="flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
-              <span>Task 07 Automation Pipeline</span>
+              <span>Automated Banking UX Pipeline</span>
               <span aria-hidden="true">·</span>
-              <span>DefineInfoTech Pvt. Ltd. Internship 2026</span>
+              <span>DefineInfoTech</span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
               Automated Mobile Banking UX Ingestion & Scoring Engine
