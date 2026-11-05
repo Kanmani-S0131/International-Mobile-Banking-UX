@@ -1,30 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { PipelineStudio } from './components/PipelineStudio';
-import { MasterDatasetView } from './components/MasterDatasetView';
-import { RejectedInspectorView } from './components/RejectedInspectorView';
+import { ProcessedLeadsView } from './components/ProcessedLeadsView';
+import { SLABreachView } from './components/SLABreachView';
+import { QuarantineView } from './components/QuarantineView';
 import { AnalyticsDashboardView } from './components/AnalyticsDashboardView';
-import { BusinessRulesView } from './components/BusinessRulesView';
-import { PytestRunnerView } from './components/PytestRunnerView';
+import { ScoringRulesView } from './components/ScoringRulesView';
+import { UnitTestRunnerView } from './components/UnitTestRunnerView';
 import { ProjectReportModal } from './components/ProjectReportModal';
-import { generateBenchmarkDataset } from './data/rawBenchmarkDataset';
-import { executeFullPipeline } from './engine/pipelineEngine';
-import { RawRecord, PipelineExecutionLog } from './types/pipeline';
+import { generateBenchmarkLeads } from './data/rawBenchmarkLeads';
+import { executeCRMPipeline } from './engine/crmPipelineEngine';
+import { RawLead } from './types/crm';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('pipeline');
   const [isDark, setIsDark] = useState<boolean>(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [activeStageIdx, setActiveStageIdx] = useState<number>(4);
+  const [activeStageIdx, setActiveStageIdx] = useState<number>(5);
+  const [referenceDate, setReferenceDate] = useState<string>('2026-11-02');
 
-  // Initialize raw records with benchmark dataset (194 rows)
-  const [rawRecords, setRawRecords] = useState<RawRecord[]>(() => generateBenchmarkDataset());
+  // Initialize raw leads with benchmark dataset (126 records)
+  const [rawLeads, setRawLeads] = useState<RawLead[]>(() => generateBenchmarkLeads());
 
-  // Pipeline output
+  // Pipeline output state
   const [pipelineOutput, setPipelineOutput] = useState(() => {
-    const initialRaw = generateBenchmarkDataset();
-    return executeFullPipeline(initialRaw);
+    const initialRaw = generateBenchmarkLeads();
+    return executeCRMPipeline(initialRaw, '2026-11-02');
   });
 
   // Dark mode effect
@@ -36,96 +38,127 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Execute pipeline runner with visual progression
-  const triggerPipelineRun = useCallback((recordsToProcess = rawRecords) => {
-    setIsRunning(true);
-    setActiveStageIdx(0);
+  // Execute pipeline runner with staged visual progression
+  const triggerPipelineRun = useCallback(
+    (leadsToProcess = rawLeads, refDate = referenceDate) => {
+      setIsRunning(true);
+      setActiveStageIdx(0); // Ingest
 
-    // Staged visual timing for realistic pipeline simulation
-    setTimeout(() => {
-      setActiveStageIdx(1); // Clean
       setTimeout(() => {
-        setActiveStageIdx(2); // Validate
+        setActiveStageIdx(1); // Validate
         setTimeout(() => {
-          setActiveStageIdx(3); // Score
+          setActiveStageIdx(2); // Dedupe
           setTimeout(() => {
-            setActiveStageIdx(4); // Report
-            const output = executeFullPipeline(recordsToProcess);
-            setPipelineOutput(output);
-            setIsRunning(false);
-          }, 350);
-        }, 350);
-      }, 350);
-    }, 350);
-  }, [rawRecords]);
+            setActiveStageIdx(3); // Score
+            setTimeout(() => {
+              setActiveStageIdx(4); // Assign
+              setTimeout(() => {
+                setActiveStageIdx(5); // SLA & Output
+                const output = executeCRMPipeline(leadsToProcess, refDate);
+                setPipelineOutput(output);
+                setIsRunning(false);
+              }, 300);
+            }, 300);
+          }, 300);
+        }, 300);
+      }, 300);
+    },
+    [rawLeads, referenceDate]
+  );
+
+  const handleReferenceDateChange = (newDate: string) => {
+    setReferenceDate(newDate);
+    const output = executeCRMPipeline(rawLeads, newDate);
+    setPipelineOutput(output);
+  };
 
   const handleResetBenchmark = () => {
-    const freshBenchmark = generateBenchmarkDataset();
-    setRawRecords(freshBenchmark);
-    triggerPipelineRun(freshBenchmark);
+    const fresh = generateBenchmarkLeads();
+    setRawLeads(fresh);
+    triggerPipelineRun(fresh, referenceDate);
   };
 
-  const handleCustomFileUpload = (customRecords: RawRecord[]) => {
-    setRawRecords(customRecords);
-    triggerPipelineRun(customRecords);
+  const handleCustomFileUpload = (customLeads: RawLead[]) => {
+    setRawLeads(customLeads);
+    triggerPipelineRun(customLeads, referenceDate);
   };
 
-  const handleRecordFixed = (originalRecordId: string, fixedRecord: RawRecord) => {
-    const updated = rawRecords.map((r) => (r.record_id === originalRecordId ? fixedRecord : r));
-    setRawRecords(updated);
-    triggerPipelineRun(updated);
+  const handleLeadFixed = (originalLeadId: string, fixedLead: RawLead) => {
+    const updated = rawLeads.map((l) => (l.lead_id === originalLeadId ? fixedLead : l));
+    setRawLeads(updated);
+    triggerPipelineRun(updated, referenceDate);
+  };
+
+  const handleMarkContacted = (leadId: string) => {
+    const updated = rawLeads.map((l) =>
+      l.lead_id === leadId ? { ...l, status: 'Contacted' } : l
+    );
+    setRawLeads(updated);
+    const output = executeCRMPipeline(updated, referenceDate);
+    setPipelineOutput(output);
+  };
+
+  const handleReassignLead = (leadId: string, newOwner: string) => {
+    setPipelineOutput((prev) => {
+      const updatedLeads = prev.processedLeads.map((l) =>
+        l.lead_id === leadId ? { ...l, assigned_to: newOwner } : l
+      );
+      return { ...prev, processedLeads: updatedLeads };
+    });
   };
 
   const handleExportCsv = () => {
-    const records = pipelineOutput.validRecords;
-    if (records.length === 0) return;
+    const leads = pipelineOutput.processedLeads;
+    if (leads.length === 0) return;
 
     const headers = [
-      'record_id',
-      'bank_name',
-      'country',
-      'app_name',
-      'screen_no',
-      'screen_name',
-      'screen_category',
-      'features_present',
-      'auth_method',
-      'languages_supported',
-      'accessibility_flag',
-      'ux_rating',
-      'ux_score',
-      'ux_grade',
-      'rating_component',
-      'features_component',
-      'accessibility_component',
-      'languages_component',
-      'collected_by',
-      'collected_date',
-      'source_file',
+      'lead_id',
+      'name',
+      'company',
+      'industry',
+      'email',
+      'phone',
+      'source',
+      'region',
+      'created_date',
+      'status',
+      'budget',
+      'company_size',
+      'timeline',
+      'website_visits',
+      'emails_opened',
+      'score',
+      'grade',
+      'assigned_to',
+      'rep_seniority',
+      'followup_due_date',
+      'is_sla_breach',
+      'days_overdue',
     ];
 
-    const rows = records.map((r) => [
-      r.record_id,
-      `"${r.bank_name}"`,
-      `"${r.country_cleaned}"`,
-      `"${r.app_name}"`,
-      r.screen_no,
-      `"${r.screen_name}"`,
-      `"${r.screen_category}"`,
-      `"${r.features_present}"`,
-      `"${r.auth_method}"`,
-      `"${r.languages_supported}"`,
-      r.accessibility_flag_cleaned,
-      r.ux_rating,
-      r.ux_score,
-      r.ux_grade,
-      r.score_breakdown.rating_component,
-      r.score_breakdown.features_component,
-      r.score_breakdown.accessibility_component,
-      r.score_breakdown.languages_component,
-      `"${r.collected_by}"`,
-      r.collected_date,
-      `"${r.source_file || ''}"`,
+    const rows = leads.map((l) => [
+      l.lead_id,
+      `"${l.name}"`,
+      `"${l.company}"`,
+      `"${l.industry}"`,
+      `"${l.email}"`,
+      `"${l.phone}"`,
+      `"${l.source}"`,
+      `"${l.region}"`,
+      l.created_date,
+      `"${l.status}"`,
+      l.budget,
+      l.company_size,
+      `"${l.timeline}"`,
+      l.website_visits,
+      l.emails_opened,
+      l.score,
+      `"${l.grade}"`,
+      `"${l.assigned_to}"`,
+      `"${l.rep_seniority}"`,
+      l.followup_due_date,
+      l.is_sla_breach ? 'True' : 'False',
+      l.days_overdue,
     ]);
 
     const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
@@ -133,7 +166,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `master_banking_ux_dataset_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `processed_leads_${referenceDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -163,65 +196,79 @@ export default function App() {
             isRunning={isRunning}
             onResetBenchmark={handleResetBenchmark}
             onCustomFileUpload={handleCustomFileUpload}
+            referenceDate={referenceDate}
+            setReferenceDate={handleReferenceDateChange}
             activeStageIdx={activeStageIdx}
           />
         )}
 
-        {activeTab === 'master' && (
-          <MasterDatasetView
-            records={pipelineOutput.validRecords}
+        {activeTab === 'processed' && (
+          <ProcessedLeadsView
+            leads={pipelineOutput.processedLeads}
             onExportCsv={handleExportCsv}
           />
         )}
 
-        {activeTab === 'rejected' && (
-          <RejectedInspectorView
-            rejectedRecords={pipelineOutput.rejectedRecords}
-            onRecordFixed={handleRecordFixed}
+        {activeTab === 'sla' && (
+          <SLABreachView
+            leads={pipelineOutput.processedLeads}
+            summaryByOwner={pipelineOutput.summaryByOwner}
+            onMarkContacted={handleMarkContacted}
+            onReassignLead={handleReassignLead}
+            referenceDate={referenceDate}
+          />
+        )}
+
+        {activeTab === 'quarantine' && (
+          <QuarantineView
+            rejectedLeads={pipelineOutput.rejectedLeads}
+            duplicateLeads={pipelineOutput.duplicateLeads}
+            onLeadFixed={handleLeadFixed}
           />
         )}
 
         {activeTab === 'analytics' && (
           <AnalyticsDashboardView
-            bankRankings={pipelineOutput.bankRankings}
-            categorySummaries={pipelineOutput.categorySummaries}
-            validRecords={pipelineOutput.validRecords}
+            summaryByGrade={pipelineOutput.summaryByGrade}
+            summaryBySource={pipelineOutput.summaryBySource}
+            summaryByOwner={pipelineOutput.summaryByOwner}
+            processedLeads={pipelineOutput.processedLeads}
           />
         )}
 
-        {activeTab === 'rules' && <BusinessRulesView />}
+        {activeTab === 'rules' && <ScoringRulesView />}
 
-        {activeTab === 'tests' && <PytestRunnerView />}
+        {activeTab === 'tests' && <UnitTestRunnerView />}
       </main>
 
-      {/* DIT Final Project Report Modal */}
+      {/* DIT-P06 Final Project Report Modal */}
       <ProjectReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
       />
 
-      {/* Quiet Footer adhering to anti-slop rules */}
+      {/* Quiet Footer */}
       <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 py-6 mt-16 text-xs text-slate-500 transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span>DefineInfoTech Pvt. Ltd. (DIT)</span>
             <span aria-hidden="true">·</span>
-            <span>Mobile Banking UX Automation Project</span>
+            <span>CRM Lead Management Automation (DIT-P06)</span>
             <span aria-hidden="true">·</span>
-            <span>Kanmani Suresh & Salman</span>
+            <span>Madhumitha & Kanmani (Team T06)</span>
           </div>
           <div className="flex items-center gap-4">
             <button
               onClick={() => setIsReportModalOpen(true)}
               className="hover:text-slate-900 dark:hover:text-white transition-colors"
             >
-              View Full Report
+              View Project Report
             </button>
             <button
               onClick={handleExportCsv}
               className="hover:text-slate-900 dark:hover:text-white transition-colors"
             >
-              Download Master Dataset
+              Export processed_leads.csv
             </button>
           </div>
         </div>

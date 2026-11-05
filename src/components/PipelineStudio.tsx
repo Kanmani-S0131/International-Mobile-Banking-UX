@@ -3,27 +3,28 @@ import {
   Play,
   RotateCcw,
   Upload,
-  Database,
+  Calendar,
   CheckCircle2,
   AlertTriangle,
-  Layers,
+  Clock,
   Sparkles,
   Terminal,
-  FileCheck,
-  ArrowRight,
-  Filter,
+  IndianRupee,
   PlusCircle,
+  FileSpreadsheet,
 } from 'lucide-react';
-import { PipelineExecutionLog, PipelineStats, RawRecord } from '../types/pipeline';
-import { testSingleRecord } from '../engine/pipelineEngine';
+import { PipelineLog, PipelineStats, RawLead } from '../types/crm';
+import { calculateLeadScore, cleanIndianPhone, runValidationStage } from '../engine/crmPipelineEngine';
 
 interface PipelineStudioProps {
   stats: PipelineStats;
-  logs: PipelineExecutionLog[];
+  logs: PipelineLog[];
   onRunPipeline: () => void;
   isRunning: boolean;
   onResetBenchmark: () => void;
-  onCustomFileUpload: (records: RawRecord[]) => void;
+  onCustomFileUpload: (leads: RawLead[]) => void;
+  referenceDate: string;
+  setReferenceDate: (val: string) => void;
   activeStageIdx: number;
 }
 
@@ -34,89 +35,130 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
   isRunning,
   onResetBenchmark,
   onCustomFileUpload,
+  referenceDate,
+  setReferenceDate,
   activeStageIdx,
 }) => {
-  const [testerOpen, setTesterOpen] = useState(false);
-  const [testPayload, setTestPayload] = useState<Partial<RawRecord>>({
-    bank_name: 'Lion City Bank',
-    country: 'USA',
-    app_name: 'LionPay',
-    screen_no: 99,
-    screen_name: 'Custom Instant Pay Hub',
-    screen_category: 'Payments',
-    features_present: 'Biometrics; Instant Pay; QR Pay',
-    auth_method: 'Biometric',
-    languages_supported: 'English; Mandarin',
-    accessibility_flag: 'y',
-    ux_rating: 4.8,
-    collected_by: 'Kanmani S.',
-    collected_date: '2026-09-25',
+  const [sandboxOpen, setSandboxOpen] = useState(false);
+  const [sandboxLead, setSandboxLead] = useState<Partial<RawLead>>({
+    name: 'Suresh Raina',
+    company: 'Raina Infotech',
+    industry: 'Information Technology',
+    email: 'suresh@rainainfotech.in',
+    phone: '+91 98765 43210',
+    source: 'Referral',
+    region: 'North',
+    created_date: '2026-10-15',
+    status: 'New',
+    budget: 1500000,
+    company_size: 250,
+    timeline: '0-1 Months',
+    website_visits: 6,
+    emails_opened: 4,
   });
-  const [testResult, setTestResult] = useState<any>(null);
+
+  const [sandboxResult, setSandboxResult] = useState<any>(null);
 
   const stages = [
     {
       num: 1,
-      name: 'Load',
-      module: 'loader.py',
-      desc: 'Reads contributor CSV/Excel files, verifies 14 required columns, and merges multi-source rows into a single ingested buffer.',
-      metric: `${stats.files_read} Files Read`,
-      sub: `${stats.records_loaded} Raw Records`,
+      name: 'Read & Ingest',
+      module: 'main.py',
+      desc: 'Ingests raw leads buffer from leads_raw.csv with 14 mandatory & optional schema attributes.',
+      metric: `${stats.input_records} Records`,
+      sub: 'Input File Buffer',
     },
     {
       num: 2,
-      name: 'Clean',
-      module: 'cleaner.py',
-      desc: 'Trims text, normalizes country aliases (USA -> United States), standardizes Y/N flags, cleans delimited lists, and canonicalizes date formats.',
-      metric: `${stats.records_cleaned} Rows Cleaned`,
-      sub: '12 Fixable Repaired',
+      name: 'Validate & Clean',
+      module: 'validators.py',
+      desc: 'Validates email, normalizes Indian phone (+91 strip), bounds check budget, isolates 12 corrupted rows.',
+      metric: `${stats.valid_records} Valid Rows`,
+      sub: `${stats.rejected_records} Rejected`,
     },
     {
       num: 3,
-      name: 'Validate',
-      module: 'validator.py',
-      desc: 'Applies business rules BR1 to BR5. Isolates valid screens from rejected records with explicit reason diagnostics and duplicate detection.',
-      metric: `${stats.records_valid} Valid Screens`,
-      sub: `${stats.records_rejected} Rejected Rows`,
+      name: 'Deduplicate',
+      module: 'dedupe.py',
+      desc: 'Groups by email, keeps earliest created_date record, isolates 6 duplicates to duplicate_leads.csv.',
+      metric: `${stats.processed_leads} Unique Leads`,
+      sub: `${stats.duplicates_removed} Duplicates`,
     },
     {
       num: 4,
-      name: 'Score',
-      module: 'rules.py',
-      desc: 'Evaluates BR7 UX scoring formula (Rating 60 + Features 20 + Accessibility 10 + Languages 10) and assigns BR8 Quality Grade tiers.',
-      metric: `${stats.avg_ux_score.toFixed(1)} / 100`,
-      sub: 'Avg UX Score',
+      name: 'Score & Grade',
+      module: 'scoring.py',
+      desc: 'Evaluates 5 scoring factors (Source 25, Budget 25, Size 15, Engagement 15, Timeline 20). Tiers: Hot, Warm, Cold.',
+      metric: `${stats.avg_score.toFixed(1)} / 100`,
+      sub: 'Avg Lead Score',
     },
     {
       num: 5,
-      name: 'Report',
-      module: 'report.py',
-      desc: 'Builds comparative bank rankings, screen category performance curves, Excel workbook outputs, and executive documentation.',
-      metric: `${stats.banks_covered} Banks Ranked`,
-      sub: '13 Categories Sync',
+      name: 'Regional Assignment',
+      module: 'assignment.py',
+      desc: 'Assigns open leads to sales team by region (North/South/East/West) via round-robin. Hot leads to Senior reps.',
+      metric: 'Round-Robin',
+      sub: 'Senior/Junior Rules',
+    },
+    {
+      num: 6,
+      name: 'SLA Tracking',
+      module: 'followup.py',
+      desc: 'Calculates response due dates (Hot: 1d, Warm: 3d, Cold: 7d). Evaluates delays against reference date.',
+      metric: `${stats.sla_breaches} Breaches`,
+      sub: `Checked @ ${referenceDate}`,
     },
   ];
 
-  const handleRunTester = () => {
-    const fullRec: RawRecord = {
-      record_id: 'TEST_LIVE_' + Math.floor(Math.random() * 1000),
-      bank_name: testPayload.bank_name || '',
-      country: testPayload.country || '',
-      app_name: testPayload.app_name || '',
-      screen_no: Number(testPayload.screen_no) || 1,
-      screen_name: testPayload.screen_name || 'Test Screen',
-      screen_category: testPayload.screen_category || 'Login',
-      features_present: testPayload.features_present || '',
-      auth_method: testPayload.auth_method || 'Password',
-      languages_supported: testPayload.languages_supported || 'English',
-      accessibility_flag: testPayload.accessibility_flag || 'No',
-      ux_rating: testPayload.ux_rating !== undefined ? testPayload.ux_rating : 3,
-      collected_by: testPayload.collected_by || 'Tester',
-      collected_date: testPayload.collected_date || '2026-09-20',
-      source_file: 'sandbox_test.csv',
+  const handleTestSandboxLead = () => {
+    const raw: RawLead = {
+      lead_id: 'SANDBOX_' + Math.floor(Math.random() * 1000),
+      name: sandboxLead.name || 'Sample Lead',
+      company: sandboxLead.company || 'Sample Co',
+      industry: sandboxLead.industry || 'Tech',
+      email: sandboxLead.email || '',
+      phone: sandboxLead.phone || '',
+      source: sandboxLead.source || 'Referral',
+      region: sandboxLead.region || 'North',
+      created_date: sandboxLead.created_date || '2026-10-15',
+      status: sandboxLead.status || 'New',
+      budget: sandboxLead.budget || 0,
+      company_size: sandboxLead.company_size || 10,
+      timeline: sandboxLead.timeline || '1-3 Months',
+      website_visits: sandboxLead.website_visits || 0,
+      emails_opened: sandboxLead.emails_opened || 0,
     };
-    const res = testSingleRecord(fullRec);
-    setTestResult(res);
+
+    const { validLeads, rejectedLeads } = runValidationStage([raw]);
+    if (rejectedLeads.length > 0) {
+      setSandboxResult({ is_valid: false, error: rejectedLeads[0].reject_reason });
+    } else {
+      const valid = validLeads[0];
+      const scoring = calculateLeadScore(valid);
+
+      // SLA
+      let slaDays = 7;
+      if (scoring.grade === 'Hot') slaDays = 1;
+      else if (scoring.grade === 'Warm') slaDays = 3;
+
+      const createdD = new Date(valid.created_date);
+      const dueD = new Date(createdD.getTime() + slaDays * 24 * 60 * 60 * 1000);
+      const refD = new Date(referenceDate);
+      const isBreach = valid.status === 'New' && dueD.getTime() < refD.getTime();
+      const overdue = isBreach ? Math.floor((refD.getTime() - dueD.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+
+      setSandboxResult({
+        is_valid: true,
+        valid,
+        score: scoring.score,
+        grade: scoring.grade,
+        breakdown: scoring.breakdown,
+        slaDays,
+        dueDate: dueD.toISOString().slice(0, 10),
+        isBreach,
+        overdue,
+      });
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -127,49 +169,40 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        // Simple CSV or JSON parsing
-        if (file.name.endsWith('.json')) {
-          const parsed = JSON.parse(text);
-          if (Array.isArray(parsed)) {
-            onCustomFileUpload(parsed);
+        const lines = text.split('\n').filter((l) => l.trim().length > 0);
+        if (lines.length > 1) {
+          const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
+          const customRows: RawLead[] = [];
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+            const obj: any = {};
+            headers.forEach((h, idx) => {
+              obj[h] = cols[idx] !== undefined ? cols[idx] : '';
+            });
+            customRows.push({
+              lead_id: obj.lead_id || `CUST_${i}`,
+              name: obj.name || 'Unnamed',
+              company: obj.company || 'Unknown Co',
+              industry: obj.industry || 'General',
+              email: obj.email || '',
+              phone: obj.phone || '',
+              source: obj.source || 'Website',
+              region: obj.region || 'North',
+              created_date: obj.created_date || '2026-10-01',
+              status: obj.status || 'New',
+              budget: obj.budget || 0,
+              company_size: obj.company_size || 10,
+              timeline: obj.timeline || '1-3 Months',
+              website_visits: obj.website_visits || 0,
+              emails_opened: obj.emails_opened || 0,
+            });
           }
-        } else {
-          // Parse CSV
-          const lines = text.split('\n').filter((l) => l.trim().length > 0);
-          if (lines.length > 1) {
-            const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
-            const customRows: RawRecord[] = [];
-            for (let i = 1; i < lines.length; i++) {
-              const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
-              const obj: any = {};
-              headers.forEach((h, idx) => {
-                obj[h] = cols[idx] !== undefined ? cols[idx] : '';
-              });
-              customRows.push({
-                record_id: obj.record_id || `CUSTOM_${i}`,
-                bank_name: obj.bank_name || '',
-                country: obj.country || '',
-                app_name: obj.app_name || '',
-                screen_no: obj.screen_no || i,
-                screen_name: obj.screen_name || `Screen ${i}`,
-                screen_category: obj.screen_category || 'Login',
-                features_present: obj.features_present || '',
-                auth_method: obj.auth_method || 'Password',
-                languages_supported: obj.languages_supported || 'English',
-                accessibility_flag: obj.accessibility_flag || 'No',
-                ux_rating: obj.ux_rating || 3.0,
-                collected_by: obj.collected_by || 'Custom Contributor',
-                collected_date: obj.collected_date || '2026-09-15',
-                source_file: file.name,
-              });
-            }
-            if (customRows.length > 0) {
-              onCustomFileUpload(customRows);
-            }
+          if (customRows.length > 0) {
+            onCustomFileUpload(customRows);
           }
         }
       } catch (err) {
-        console.error('File parsing error', err);
+        console.error('File parse error', err);
       }
     };
     reader.readAsText(file);
@@ -177,45 +210,57 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
 
   return (
     <div className="space-y-8">
-      {/* Top Hero / Control Banner */}
+      {/* Top Hero & Control Banner */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-1.5 max-w-2xl">
             <div className="flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
-              <span>Automated Banking UX Pipeline</span>
+              <span>Project ID: DIT-P06</span>
               <span aria-hidden="true">·</span>
-              <span>DefineInfoTech</span>
+              <span>DefineInfoTech Pvt. Ltd. (Team T06)</span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-              Automated Mobile Banking UX Ingestion & Scoring Engine
+              CRM Lead Management & Intelligent SLA Dispatch Engine
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-              Converts inconsistent contributor spreadsheets from 12 countries into a clean, analysis-ready
-              dataset with validated business rules, composite UX scores, and anomaly separation.
+              Automates the complete inbound lead pipeline: cleans incoming data, eliminates duplicates,
+              scores leads 0–100 (Hot/Warm/Cold), assigns sales reps by region & seniority, and flags SLA breaches.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* Reference Date Config */}
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs">
+              <Calendar className="w-3.5 h-3.5 text-slate-500" />
+              <span className="text-slate-500">Ref Date:</span>
+              <input
+                type="date"
+                value={referenceDate}
+                onChange={(e) => setReferenceDate(e.target.value)}
+                className="bg-transparent font-mono text-slate-900 dark:text-white focus:outline-hidden text-xs"
+              />
+            </div>
+
             <button
               onClick={onResetBenchmark}
               className="flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Load 194-Record Benchmark</span>
+              <span>Reset 126 Benchmark</span>
             </button>
 
             <label className="flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer">
               <Upload className="w-3.5 h-3.5" />
-              <span>Upload Contributor File</span>
-              <input type="file" accept=".csv,.json" onChange={handleFileUpload} className="hidden" />
+              <span>Upload CSV</span>
+              <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
             </label>
 
             <button
-              onClick={() => setTesterOpen(!testerOpen)}
+              onClick={() => setSandboxOpen(!sandboxOpen)}
               className="flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/40 hover:bg-blue-100 dark:hover:bg-blue-900/60 rounded-lg transition-colors"
             >
               <PlusCircle className="w-3.5 h-3.5" />
-              <span>Single Record Sandbox</span>
+              <span>Lead Sandbox</span>
             </button>
 
             <button
@@ -230,7 +275,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
               {isRunning ? (
                 <>
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Running Stages...</span>
+                  <span>Executing Pipeline...</span>
                 </>
               ) : (
                 <>
@@ -242,65 +287,72 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
           </div>
         </div>
 
-        {/* Live Metrics Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 pt-6 mt-6 border-t border-slate-100 dark:border-slate-800">
+        {/* Live Metrics Row (Section 7 Results) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 pt-6 mt-6 border-t border-slate-100 dark:border-slate-800">
           <div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Files Ingested</div>
+            <div className="text-xs text-slate-500">Input Records</div>
             <div className="text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
-              {stats.files_read}
+              {stats.input_records}
             </div>
-            <div className="text-[11px] text-slate-500">2 CSV, 1 Excel</div>
+            <div className="text-[11px] text-slate-400">leads_raw.csv</div>
           </div>
           <div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Total Loaded</div>
+            <div className="text-xs text-slate-500">Valid Records</div>
             <div className="text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
-              {stats.records_loaded}
+              {stats.valid_records}
             </div>
-            <div className="text-[11px] text-slate-500">100% Ingested</div>
+            <div className="text-[11px] text-emerald-600 dark:text-emerald-400">Passed checks</div>
           </div>
           <div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Valid Screens</div>
-            <div className="text-xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1">
-              {stats.records_valid}
-            </div>
-            <div className="text-[11px] text-slate-500">Passed BR1-BR5</div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Rejected Rows</div>
+            <div className="text-xs text-slate-500">Rejected Leads</div>
             <div className="text-xl font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400 mt-1">
-              {stats.records_rejected}
+              {stats.rejected_records}
             </div>
-            <div className="text-[11px] text-slate-500">8 Invalid + 2 Dupes</div>
+            <div className="text-[11px] text-slate-400">Quarantined</div>
           </div>
           <div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Mean UX Score</div>
+            <div className="text-xs text-slate-500">Duplicates Removed</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1">
+              {stats.duplicates_removed}
+            </div>
+            <div className="text-[11px] text-slate-400">Same email kept 1st</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Processed (Unique)</div>
             <div className="text-xl font-bold font-mono tabular-nums text-blue-600 dark:text-blue-400 mt-1">
-              {stats.avg_ux_score.toFixed(1)}
+              {stats.processed_leads}
             </div>
-            <div className="text-[11px] text-slate-500">Scale 0 - 100</div>
+            <div className="text-[11px] text-emerald-600 dark:text-emerald-400">Scored & Assigned</div>
           </div>
           <div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Execution Speed</div>
-            <div className="text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
-              {stats.execution_time_ms} ms
+            <div className="text-xs text-slate-500">SLA Breaches</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400 mt-1">
+              {stats.sla_breaches}
             </div>
-            <div className="text-[11px] text-emerald-600 dark:text-emerald-400">Instant Pipeline</div>
+            <div className="text-[11px] text-rose-500">All status 'New'</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Pipeline Budget</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1">
+              ₹{(stats.total_pipeline_value_inr / 10000000).toFixed(2)} Cr
+            </div>
+            <div className="text-[11px] text-slate-400">INR Pipeline</div>
           </div>
         </div>
       </div>
 
-      {/* Interactive Single Record Sandbox Drawer */}
-      {testerOpen && (
+      {/* Interactive Sandbox Drawer */}
+      {sandboxOpen && (
         <div className="bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900/60 rounded-xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Live Single Record Sandbox (Test Cleaner & Business Rules)
+                Live Single Lead Sandbox (Test Validation, Scoring & SLA Rules)
               </h3>
             </div>
             <button
-              onClick={() => setTesterOpen(false)}
+              onClick={() => setSandboxOpen(false)}
               className="text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white"
             >
               Close
@@ -309,127 +361,141 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">Bank Name</label>
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Contact Name</label>
               <input
                 type="text"
-                value={testPayload.bank_name || ''}
-                onChange={(e) => setTestPayload({ ...testPayload, bank_name: e.target.value })}
+                value={sandboxLead.name || ''}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, name: e.target.value })}
                 className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">Country (or Alias e.g. USA, UK)</label>
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Company</label>
               <input
                 type="text"
-                value={testPayload.country || ''}
-                onChange={(e) => setTestPayload({ ...testPayload, country: e.target.value })}
+                value={sandboxLead.company || ''}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, company: e.target.value })}
                 className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">Category</label>
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Email</label>
               <input
-                type="text"
-                value={testPayload.screen_category || ''}
-                onChange={(e) => setTestPayload({ ...testPayload, screen_category: e.target.value })}
+                type="email"
+                value={sandboxLead.email || ''}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, email: e.target.value })}
                 className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">UX Rating (1.0 - 5.0)</label>
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Phone (+91 supported)</label>
               <input
-                type="number"
-                step="0.1"
-                value={testPayload.ux_rating !== undefined ? testPayload.ux_rating : ''}
-                onChange={(e) => setTestPayload({ ...testPayload, ux_rating: parseFloat(e.target.value) })}
+                type="text"
+                value={sandboxLead.phone || ''}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, phone: e.target.value })}
                 className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
               />
             </div>
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">Accessibility Flag (y / n / Yes)</label>
-              <input
-                type="text"
-                value={testPayload.accessibility_flag || ''}
-                onChange={(e) => setTestPayload({ ...testPayload, accessibility_flag: e.target.value })}
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Source</label>
+              <select
+                value={sandboxLead.source || 'Referral'}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, source: e.target.value })}
                 className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              >
+                <option value="Referral">Referral (25 pts)</option>
+                <option value="Webinar">Webinar (20 pts)</option>
+                <option value="Website">Website (15 pts)</option>
+                <option value="Trade Show">Trade Show (15 pts)</option>
+                <option value="Social Media">Social Media (8 pts)</option>
+                <option value="Cold Call">Cold Call (5 pts)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Region</label>
+              <select
+                value={sandboxLead.region || 'North'}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, region: e.target.value })}
+                className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              >
+                <option value="North">North (Arjun Rao / Meena / Karan)</option>
+                <option value="South">South (Priya Nair / Rajesh / Deepa)</option>
+                <option value="West">West (Rohan Mehta / Neha / Vikram)</option>
+                <option value="East">East (Ananya Sen / Amit / Sayan)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Budget in INR (₹)</label>
+              <input
+                type="number"
+                value={sandboxLead.budget}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, budget: parseFloat(e.target.value) })}
+                className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
               />
             </div>
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">Features Present (; separated)</label>
-              <input
-                type="text"
-                value={testPayload.features_present || ''}
-                onChange={(e) => setTestPayload({ ...testPayload, features_present: e.target.value })}
+              <label className="block text-slate-600 dark:text-slate-400 mb-1">Timeline</label>
+              <select
+                value={sandboxLead.timeline || '0-1 Months'}
+                onChange={(e) => setSandboxLead({ ...sandboxLead, timeline: e.target.value })}
                 className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">Auth Method</label>
-              <input
-                type="text"
-                value={testPayload.auth_method || ''}
-                onChange={(e) => setTestPayload({ ...testPayload, auth_method: e.target.value })}
-                className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-600 dark:text-slate-400 mb-1">Date Collected (YYYY-MM-DD)</label>
-              <input
-                type="text"
-                value={testPayload.collected_date || ''}
-                onChange={(e) => setTestPayload({ ...testPayload, collected_date: e.target.value })}
-                className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
+              >
+                <option value="0-1 Months">0-1 Months (20 pts)</option>
+                <option value="1-3 Months">1-3 Months (12 pts)</option>
+                <option value="3-6 Months">3-6 Months (6 pts)</option>
+                <option value="6+ Months">6+ Months (2 pts)</option>
+              </select>
             </div>
           </div>
 
           <div className="flex items-center gap-3 pt-2">
             <button
-              onClick={handleRunTester}
+              onClick={handleTestSandboxLead}
               className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
             >
-              Validate & Compute Score
+              Validate & Score Lead
             </button>
             <span className="text-xs text-slate-500">
-              Evaluates BR1-BR6 standardizations and BR7-BR8 scoring.
+              Evaluates rules in validators.py, scoring.py, and followup.py against reference date {referenceDate}.
             </span>
           </div>
 
-          {testResult && (
+          {sandboxResult && (
             <div
               className={`p-4 rounded-lg text-xs border ${
-                testResult.is_valid
+                sandboxResult.is_valid
                   ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
                   : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800'
               }`}
             >
-              <div className="flex items-center justify-between font-semibold mb-2">
-                <span className={testResult.is_valid ? 'text-emerald-800 dark:text-emerald-300' : 'text-rose-800 dark:text-rose-300'}>
-                  {testResult.is_valid ? 'Screen Passed All Business Rules!' : `Validation Failed: ${testResult.rejection?.rule_id}`}
-                </span>
-                {testResult.is_valid && (
-                  <span className="font-mono text-emerald-900 dark:text-emerald-200">
-                    UX Score: {testResult.scored?.ux_score} / 100 ({testResult.scored?.ux_grade})
-                  </span>
-                )}
-              </div>
-
-              {!testResult.is_valid ? (
-                <div className="text-rose-700 dark:text-rose-300 space-y-1">
-                  <div><strong>Reason:</strong> {testResult.rejection?.rejection_reason}</div>
-                  <div><strong>Suggested Fix:</strong> {testResult.rejection?.suggested_fix}</div>
+              {!sandboxResult.is_valid ? (
+                <div className="text-rose-700 dark:text-rose-300 font-medium">
+                  Validation Failed: {sandboxResult.error}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-700 dark:text-slate-300 pt-1">
-                  <div>Rating Component: <strong className="font-mono">{testResult.scored?.score_breakdown.rating_component}/60</strong></div>
-                  <div>Features Component: <strong className="font-mono">{testResult.scored?.score_breakdown.features_component}/20</strong></div>
-                  <div>Accessibility: <strong className="font-mono">{testResult.scored?.score_breakdown.accessibility_component}/10</strong></div>
-                  <div>Languages: <strong className="font-mono">{testResult.scored?.score_breakdown.languages_component}/10</strong></div>
-                  {testResult.cleaned.clean_modifications.length > 0 && (
-                    <div className="col-span-full pt-1 text-slate-600 dark:text-slate-400">
-                      <strong>Auto-fixed by Cleaner:</strong> {testResult.cleaned.clean_modifications.join('; ')}
-                    </div>
-                  )}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="text-emerald-800 dark:text-emerald-300">
+                      Lead Validated & Scored: {sandboxResult.score} / 100 ({sandboxResult.grade} Lead)
+                    </span>
+                    <span className="font-mono text-slate-800 dark:text-slate-200">
+                      SLA: {sandboxResult.slaDays} day(s) | Due: {sandboxResult.dueDate}{' '}
+                      {sandboxResult.isBreach ? (
+                        <span className="text-rose-600 dark:text-rose-400">
+                          (BREACH: {sandboxResult.overdue}d overdue)
+                        </span>
+                      ) : (
+                        <span className="text-emerald-600">On Track</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-slate-600 dark:text-slate-300 pt-1">
+                    <div>Source: <strong className="font-mono">{sandboxResult.breakdown.source_points}/25</strong></div>
+                    <div>Budget: <strong className="font-mono">{sandboxResult.breakdown.budget_points}/25</strong></div>
+                    <div>Comp Size: <strong className="font-mono">{sandboxResult.breakdown.company_size_points}/15</strong></div>
+                    <div>Engagement: <strong className="font-mono">{sandboxResult.breakdown.engagement_points}/15</strong></div>
+                    <div>Timeline: <strong className="font-mono">{sandboxResult.breakdown.timeline_points}/20</strong></div>
+                  </div>
                 </div>
               )}
             </div>
@@ -437,18 +503,23 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
         </div>
       )}
 
-      {/* 5-Stage Architecture Pipeline Grid */}
+      {/* 6-Stage Workflow Architecture Grid (Figure 1) */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-            5-Stage Automated Ingestion Architecture
-          </h2>
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              6-Stage Lead Processing Workflow (Figure 1: Project Workflow)
+            </h2>
+            <p className="text-xs text-slate-500">
+              Modular Python pipeline running sequentially from raw ingestion to management reports.
+            </p>
+          </div>
           <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-            Modular Python Architecture (VS Code / Pytest / Pandas)
+            DIT-P06 Pipeline
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           {stages.map((stg, idx) => {
             const isActive = isRunning && activeStageIdx === idx;
             const isCompleted = !isRunning || activeStageIdx > idx;
@@ -466,7 +537,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
                   <span className="text-xs font-mono font-semibold text-slate-400">
                     STAGE 0{stg.num}
                   </span>
-                  <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                     {stg.module}
                   </span>
                 </div>
@@ -497,40 +568,41 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({
         </div>
       </div>
 
-      {/* Real-time Terminal Logs Stream */}
+      {/* Terminal Logging Window (logs/pipeline.log) */}
       <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-md">
         <div className="flex items-center justify-between px-4 py-3 bg-slate-900/80 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Terminal className="w-4 h-4 text-emerald-400" />
             <span className="text-xs font-mono font-semibold text-slate-200">
-              Pipeline Execution Terminal (main.py / logging output)
+              Pipeline Execution Terminal (logs/pipeline.log)
             </span>
           </div>
           <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
             <span>{logs.length} events logged</span>
             <span aria-hidden="true">·</span>
-            <span>UTF-8</span>
+            <span>Ref: {referenceDate}</span>
           </div>
         </div>
 
         <div className="p-4 font-mono text-xs space-y-1.5 max-h-64 overflow-y-auto no-scrollbar">
           {logs.length === 0 ? (
-            <div className="text-slate-500">Pipeline ready. Click 'Execute Full Pipeline' to initiate.</div>
+            <div className="text-slate-500">Pipeline ready. Click 'Execute Full Pipeline' to begin.</div>
           ) : (
             logs.map((log) => {
               const colorClass =
-                log.type === 'success'
+                log.level === 'SUCCESS'
                   ? 'text-emerald-400'
-                  : log.type === 'error'
+                  : log.level === 'ERROR'
                   ? 'text-rose-400'
-                  : log.type === 'warning'
+                  : log.level === 'WARNING'
                   ? 'text-amber-400'
                   : 'text-slate-300';
 
               return (
                 <div key={log.id} className="flex items-start gap-3 leading-relaxed">
                   <span className="text-slate-500 tabular-nums shrink-0">{log.timestamp}</span>
-                  <span className="text-blue-400 font-semibold shrink-0">[{log.stage}]</span>
+                  <span className="text-blue-400 font-semibold shrink-0">[{log.module}]</span>
+                  <span className="text-slate-500 shrink-0">[{log.level}]</span>
                   <span className={colorClass}>{log.message}</span>
                 </div>
               );
